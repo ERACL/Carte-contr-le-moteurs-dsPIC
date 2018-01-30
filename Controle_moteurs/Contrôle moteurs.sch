@@ -1,4 +1,4 @@
-EESchema Schematic File Version 2  date 30/01/2018 12:00:08
+EESchema Schematic File Version 2  date 30/01/2018 14:31:43
 LIBS:power
 LIBS:device
 LIBS:transistors
@@ -569,9 +569,9 @@ F 1 "CONN_5" V 9400 6450 50  0000 C CNN
 	-1   0    0    -1  
 $EndComp
 Text Label 10250 5850 2    60   ~ 0
-DEBUG_2
+DEBUG_RX
 Text Label 10250 5750 2    60   ~ 0
-DEBUG_1
+DEBUG_TX
 Text Notes 2200 6700 0    60   ~ 0
 Témoins d'alimentation
 Text Notes 650  1800 0    60   ~ 0
@@ -585,9 +585,9 @@ Réseau de résistances - Pull up
 Text Notes 3750 5400 0    60   ~ 0
 Need détrompeurs\nPlusieurs capas au lieu d'1 grosse
 Text Label 10400 3550 2    60   ~ 0
-DEBUG_2
+DEBUG_RX
 Text Label 10400 3450 2    60   ~ 0
-DEBUG_1
+DEBUG_TX
 Text Label 10400 4150 2    60   ~ 0
 RB4
 Text Label 10400 4050 2    60   ~ 0
