@@ -1,4 +1,4 @@
-EESchema Schematic File Version 2  date 30/01/2018 14:31:43
+EESchema Schematic File Version 2  date 30/01/2018 16:42:31
 LIBS:power
 LIBS:device
 LIBS:transistors
@@ -43,6 +43,15 @@ Comment2 ""
 Comment3 ""
 Comment4 ""
 $EndDescr
+$Comp
+L CAPAPOL C14
+U 1 1 5A709251
+P 7900 4450
+F 0 "C14" H 7850 4150 50  0000 L CNN
+F 1 "4.7u" H 7850 4050 50  0000 L CNN
+	1    7900 4450
+	1    0    0    -1  
+$EndComp
 Connection ~ 3700 1550
 Wire Wire Line
 	3700 1500 3700 1550
@@ -1506,15 +1515,6 @@ P 10450 5950
 F 0 "P9" H 10530 5950 40  0000 C CNN
 F 1 "CONN_1" H 10400 5990 30  0001 C CNN
 	1    10450 5950
-	1    0    0    -1  
-$EndComp
-$Comp
-L C C14
-U 1 1 4BFD3B62
-P 7900 4450
-F 0 "C14" H 7800 4150 50  0000 L CNN
-F 1 "4.7u" H 7800 4050 50  0000 L CNN
-	1    7900 4450
 	1    0    0    -1  
 $EndComp
 Text Label 7950 3250 0    60   ~ 0
