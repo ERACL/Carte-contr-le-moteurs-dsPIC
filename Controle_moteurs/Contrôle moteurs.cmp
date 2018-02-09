@@ -1,4 +1,4 @@
-Cmp-Mod V01 Created by CvPCB (20100406 SVN-R2508)-final date = 07/02/2018 18:08:52
+Cmp-Mod V01 Created by CvPCB (20100406 SVN-R2508)-final date = 09/02/2018 08:44:19
 
 BeginCmp
 TimeStamp = /453CDC42;
@@ -234,56 +234,56 @@ EndCmp
 BeginCmp
 TimeStamp = /455C6EBD;
 Reference = P1;
-ValeurCmp = CONN_1;
+ValeurCmp = GND;
 IdModule  = 1PIN_small;
 EndCmp
 
 BeginCmp
 TimeStamp = /5A54CCAF;
 Reference = P2;
-ValeurCmp = CONN_1;
+ValeurCmp = 5V;
 IdModule  = 1PIN_small;
 EndCmp
 
 BeginCmp
 TimeStamp = /5A54CCB1;
 Reference = P3;
-ValeurCmp = CONN_1;
+ValeurCmp = 3.3V;
 IdModule  = 1PIN_small;
 EndCmp
 
 BeginCmp
 TimeStamp = /5A54C97A;
 Reference = P4;
-ValeurCmp = CONN_1;
+ValeurCmp = EN;
 IdModule  = 1PIN_small;
 EndCmp
 
 BeginCmp
 TimeStamp = /5A54C9B2;
 Reference = P5;
-ValeurCmp = CONN_1;
+ValeurCmp = L1;
 IdModule  = 1PIN_small;
 EndCmp
 
 BeginCmp
 TimeStamp = /5A54C9B5;
 Reference = P6;
-ValeurCmp = CONN_1;
+ValeurCmp = H1;
 IdModule  = 1PIN_small;
 EndCmp
 
 BeginCmp
 TimeStamp = /5A54C9B8;
 Reference = P7;
-ValeurCmp = CONN_1;
+ValeurCmp = L2;
 IdModule  = 1PIN_small;
 EndCmp
 
 BeginCmp
 TimeStamp = /5A54C9BB;
 Reference = P8;
-ValeurCmp = CONN_1;
+ValeurCmp = H2;
 IdModule  = 1PIN_small;
 EndCmp
 
@@ -362,6 +362,34 @@ TimeStamp = /5A79E852;
 Reference = P20;
 ValeurCmp = PROG;
 IdModule  = PIN_ARRAY_5x2;
+EndCmp
+
+BeginCmp
+TimeStamp = /5A7D50CB;
+Reference = P21;
+ValeurCmp = Fixe;
+IdModule  = 1pin;
+EndCmp
+
+BeginCmp
+TimeStamp = /5A7D50CF;
+Reference = P22;
+ValeurCmp = Fixe;
+IdModule  = 1pin;
+EndCmp
+
+BeginCmp
+TimeStamp = /5A7D50D1;
+Reference = P23;
+ValeurCmp = Fixe;
+IdModule  = 1pin;
+EndCmp
+
+BeginCmp
+TimeStamp = /5A7D50D2;
+Reference = P24;
+ValeurCmp = Fixe;
+IdModule  = 1pin;
 EndCmp
 
 BeginCmp
