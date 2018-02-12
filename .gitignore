@@ -20,3 +20,4 @@ $savepcb.brd
 # Exported BOM files
 *.xml
 *.csv
+*.brd-bak
