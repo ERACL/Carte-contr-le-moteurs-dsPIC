@@ -1,3 +1,3 @@
 (fp_lib_table
-  (lib (name epsa_connect)(type Legacy)(uri "$(KIPRJMOD)/epsa_connect.mod")(options "")(descr ""))
+  (lib (name EPSA_Connect)(type Legacy)(uri "$(KIPRJMOD)/epsa_connect.mod")(options "")(descr ""))
 )
