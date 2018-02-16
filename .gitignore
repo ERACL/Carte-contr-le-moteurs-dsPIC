@@ -10,6 +10,9 @@ _autosave-*
 *.tmp
 $savepcb.brd
 
+# KiCAD exports
+kicad/export
+
 # Netlist files (exported from Eeschema)
 *.net
 
@@ -20,3 +23,4 @@ $savepcb.brd
 # Exported BOM files
 *.xml
 *.csv
+*.brd-bak

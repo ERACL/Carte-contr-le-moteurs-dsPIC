@@ -1,6 +1,6 @@
 /* 
- * File:   propre.c
- * Author: Antoine
+ * File:   main.c
+ * Author: Alexandre MARSONE
  *
  * Created on 30 novembre 2016, 13:03
  */
@@ -23,20 +23,21 @@
 #fuses DEBUG      // Debug mode for use with ICD
 #fuses NOWDT      // Watchdog timer enabled/disabled by user software
 #fuses HS,NOPROTECT
-#fuses NOALTI2C1  // I2C1 mapped to SDA1/SCL1 pins
+//#fuses NOALTI2C1  // I2C1 mapped to SDA1/SCL1 pins
 
 ////////////////////////////////////////////////////////////////////////////////
 //USE
 ////////////////////////////////////////////////////////////////////////////////
 
 #use delay(clock=10000000)//pour pouvoir manipuler le temps
-#USE I2C(SLAVE, SCL=PIN_B8, SDA=PIN_B9,ADDRESS=0x42, FORCE_HW)
+#USE I2C(SLAVE, SCL=PIN_B8, SDA=PIN_B9,ADDRESS=0x21, FORCE_HW)
 
 ////////////////////////////////////////////////////////////////////////////////
 //PINS
 ////////////////////////////////////////////////////////////////////////////////
 
-#pin_select QEA1=PIN_B10 //on sélectionne les pins des encodeurs
+//on sélectionne les pins des encodeurs
+#pin_select QEA1=PIN_B10
 #pin_select QEB1=PIN_B7
 #pin_select INDX1=PIN_B11 
 #pin_select QEA2=PIN_B5 
@@ -54,22 +55,29 @@
 //VARIABLES GLOBALES
 ////////////////////////////////////////////////////////////////////////////////
 
-//Tout se fait actuellement en cm. Il faudra convertir en mm.
+//Tout se fait actuellement en cm. Il faudra convertir en mm. BOF niveau unites...
 
+// Distance et angle de consigne a parcourir.
+int16 distancec=0;
+int16 anglec=0;
+float32 anglec_rad=0;
 
-float32 xbut=0; //la consigne de position que le raspberry nous envoie
-float32 ybut=0;
-
-int8 etat_robot=0;// vaut 0 si le robot n'a pas le droit de bouger (au départ et si il y a un obstacle), 1 si il peut bouger et 2 pour arrêter le programme (en cas d'arrêt d'urgence ou de fin des 90s))
-int1 trajet_fini=0; // vaut 0 si le robot est en train de se déplacer vers xbut,ybut et vaut 1 si il est arrivé et attend une nouvelle consigne
+int8 etat_robot=0; // 0 : est en attente d'une nouvelle consigne. 1 : est en mouvement. 2 : est en pause.
+int8 ret_etat_robot=100; // Retient l'etet du robot lors d'une pause. 
+int1 set_donnees=0;
 
 float32 x=0;// l'abcisse du robot 
 float32 y=0;// l'ordonnée du robot
-float32 teta=0;// l'angle du robot
-float32 tetadeg=0;// teta en degrés (plus pratique à lire qu'un angle en rad)
+float32 teta=0;// l'angle du robot en radians, compte positivement vers la droite
+int16 tetadeg=0; // teta en degrés (plus pratique à lire qu'un angle en rad). N'est utilise que pour la communication avec le PI.
+int16 puissancec=0;
 
-int8 nd=0;// le nombre de "tics" envoyés par l'encodeur droit depuis sa dernière remise à zéro
-int8 ng=0;// le nombre de "tics" envoyés par l'encodeur gauche depuis sa dernière remise à zéro
+// Les coordonnes que la raspberry nous donne (avec tetadeg)
+int16 xpi=0;// l'abcisse du robot 
+int16 ypi=0;// l'ordonnée du robot
+
+int16 nd=0;// le nombre de "tics" envoyés par l'encodeur droit depuis sa dernière remise à zéro
+int16 ng=0;// le nombre de "tics" envoyés par l'encodeur gauche depuis sa dernière remise à zéro
 float32 dd=0;// la distance parcourue par la roue droite depuis la dernière remise à zéro des encodeurs
 float32 dg=0;// la distance parcourue par la roue gauche depuis la dernière remise à zéro des encodeurs
 float32 d=0;// la distance parcourue par le centre du robot depuis la dernière remise à zéro des encodeurs
@@ -78,41 +86,60 @@ float32 vitg=0;// La vitesse de la roue gauche
 float32 vitd=0;// La vitesse de la roue droite
 float32 teta_point; // La vitesse angulaire du robot
 
-float32 l=23;// la distance entre les roues du robot (milieu-milieu) en cm
 
 float32 v=0; // La vitesse le long de la ligne lorsqu'on avance en ligne droite
-float32 vmax=20; // La vitesse maximale lorsqu'on avance en ligne droite
-float32 vmin=10; // La vitesse minimale lorsqu'on avance en ligne droite
-float32 vmaxt=7; // La vitesse maximale lorsqu'on avance en ligne droite
+const float32 vmax=50; // La vitesse maximale lorsqu'on avance en ligne droite
+const float32 vmin=30; // La vitesse minimale lorsqu'on avance en ligne droite
+const float32 vmaxt=40; // La vitesse maximale lorsqu'on tourne
+const float32 vmint=20; // La vitesse minimale lorsqu'on tourne
 
-float leserreurs[500];
-float lesdistances[500];
-float lesvitessesg[500];
-float lesvitessesd[500];
-float lestheta[1000];
+const float32 l=230;// la distance entre les roues du robot (milieu-milieu) en mm
 
-int8 periodepwm=100;
-float32 pgprec=0;
-float32 pdprec=0;
+const int16 puissancec_max=100;
 
-float32 interrg=0;
-float32 interrd=0;
+const int8 periodepwm=100;
+
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void actualisepos()// la fonction qui analyse les données des encodeurs pour connaître les déplacements du robot
+// Fonctions utile...
+float32 modulo_2_pi(float32 x)
+{
+    return x-floor(x/(PI*2.0))*2.0*PI;
+}
+
+// Fonction donnant la vitesse des roues pour l'asservissement. 
+// _x correspont a la distance totale, _y a ce qui a ete parcouru.
+float32 fonction_vitesse(float32 _x, float32 _y)
+{
+    return exp(-((_x-_y/2)/(_y/3))*((_x-_y/2)/(_y/3))*((_x-_y/2)/(_y/3))*((_x-_y/2)/(_y/3)));
+}
+
+int16 modulo_360(int16 x)
+{
+    //return x-floor((x/(360)))*360;
+   return x%360;
+}
+
+
+////////////////////////////////////////////////////////////////////////////////
+
+// La fonction qui analyse les données des encodeurs pour connaître les déplacements du robot.
+// A appeler regulierement (toutes les 10 ms au moins)
+void actualisepos()
 {
     nd=-qei_get_count(1);// on relève la valeur du compteur de l'encodeur droit
     ng=qei_get_count(2);// on relève la valeur du compteur de l'encodeur gauche
     qei_set_count(1,0);// on remet l'encodeur droit à zéro
     qei_set_count(2,0);// on remet l'encodeur gauche à zéro
-    dd=(70/71.7)*nd*PI*3.5*49/(46*19456);// on calcule la distance parcourue par la roue droite depuis la dernière actualisation
-    dg=(70/71.7)*ng*PI*3.5*49/(46*19456);// on calcule la distance parcourue par la roue gauche depuis la dernière actualisation
-    d=(dd+dg)/2;// on calcule la distance parcourue par le centre du robot depuis la dernière actualisation
-    a=0.997*(360/353.7)*(dd-dg)/l;// on calcule l'angle dont a tourné le robot depuis sa dernière actualisation
-    teta=teta+a*0.982*180/185;// on actualise teta
+   dd=0.0005877349162882185*nd;
+   dg=0.0005877349162882185*ng;
+    d=(dd+dg)/2.0;// on calcule la distance parcourue par le centre du robot depuis la dernière actualisation
+   a=1.0147582697201019*(dd-dg)/l;
+   teta=teta-a*0.9554594594594594;
 
     // on fait en sorte que teta reste entre 0 et 2*PI
+   /*
     if (teta>2*PI)
     {
         teta=teta-2*PI;
@@ -121,86 +148,116 @@ void actualisepos()// la fonction qui analyse les données des encodeurs pour con
     {
         teta=teta+2*PI;
     }
-    x=x+d*cos(teta-a*0.982/22);// on actualise x
-    y=y+d*sin(teta-a*0.982/22);// on actualise y
-    tetadeg=teta*360/(2*PI);// on calcule la valeur de teta en degres
+   */
+    float32 tet = modulo_2_pi(teta-a*0.044636363636363634);
+   x=x+d*cos(tet);
+   y=y+d*sin(tet);
+   tetadeg=teta*57.2957795;// on calcule la valeur de teta en degres
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
+
+// Fonction qui gere au plus bas niveau les moteurs. 
 // pg / pd puissance gauche / droit
 void avance(float pg, float pd)
 {
-    int g=floor(pg*periodepwm/100);
-    int d=floor(pd*periodepwm/100);
-    if (((pg*pgprec)>0)*((pd*pdprec)>0))
+   // int8 normallement
+    int8 g=floor(pg*periodepwm/100.0);
+    int8 d=floor(pd*periodepwm/100.0);
+    
+    // Moteur gauche
+    if (pg>0)
     {
-        set_motor_pwm_duty(1,1,abs(d));//floor((511-pd*511/100))); // le moteur droit tourne avec un dc de 511 à 0
-        set_motor_pwm_duty(1,2,abs(g));//floor(pg*255/100)); //le moteur gauche tourne avec un dc de 0 à 255
+      // On avance
+      set_motor_unit( 1,2,MPWM_INDEPENDENT | MPWM_ENABLE_H | MPWM_FORCE_L_0,0,0);
+    }
+    else if (pg<0)
+    {
+      // On recule
+      set_motor_unit( 1,2,MPWM_INDEPENDENT | MPWM_ENABLE_L | MPWM_FORCE_H_0,0,0);
     }
     else
     {
-        if ((pg>0)*(pgprec<=0))
-        {
-            set_motor_unit( 1,2,MPWM_INDEPENDENT | MPWM_ENABLE | MPWM_FORCE_L_0,0,0);
-        }
-        if ((pg<=0)*(pgprec>=0))
-        {
-            set_motor_unit( 1,2,MPWM_INDEPENDENT | MPWM_ENABLE | MPWM_FORCE_H_0,0,0);
-        }
-        if ((pd>0)*(pdprec<=0))
-        {
-            set_motor_unit( 1,1,MPWM_INDEPENDENT | MPWM_ENABLE | MPWM_FORCE_H_0,0,0);
-        }
-        if ((pd<=0)*(pdprec>=0))
-        {
-            set_motor_unit( 1,1,MPWM_INDEPENDENT | MPWM_ENABLE | MPWM_FORCE_L_0,0,0);
-        }
-        set_motor_pwm_duty(1,1,abs(d));//floor((511-pd*511/100))); // le moteur droit tourne avec un dc de 511 à 0
-        set_motor_pwm_duty(1,2,abs(g));
+      // On utilise le frein moteur
+      set_motor_unit( 1,2,MPWM_INDEPENDENT,0,0);
     }
-    pgprec=pg;
-    pdprec=pd;
+    
+   // Moteur droit
+    if(pd>0)
+    {
+      // On avance
+       set_motor_unit( 1,1,MPWM_INDEPENDENT | MPWM_ENABLE_L | MPWM_FORCE_H_0,0,0);
+    }
+    else if (pd<0)
+    {
+      // On recule 
+       set_motor_unit( 1,1,MPWM_INDEPENDENT | MPWM_ENABLE_H | MPWM_FORCE_L_0,0,0);
+    }
+   else
+   {
+      // On utilise le frein moteur
+      set_motor_unit( 1,1,MPWM_INDEPENDENT,0,0);
+   }
+   
+   set_motor_pwm_duty(1,1,abs(d));//floor((511-pd*511/100))); // le moteur droit tourne avec un dc de 511 à 0
+   set_motor_pwm_duty(1,2,abs(g));
 }
+
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void asservit(float vcg, float vcd,long temps,long periode)
+// Variables pour la fonction suivante
+
+// Calcul de l'integrale de l'erreur
+float32 interrg=0;
+float32 interrd=0;
+
+// Fonction qui sert a asservir lavitesse des roues du robot. S'appuie sur avance.
+// temps et periode sont en us.
+void asservit(float32 vcg, float32 vcd, int16 temps, int16 periode)
 {
-	// periode en microsecondes
-    float vg=0;
-    float vd=0;
-    float pg=0;
-    float pd=0;
-    long tps=0;
-    float kpv=1;
-    float kdv=0.001;
-    float kiv=10;
-    float errprecg=0;
-    float errprecd=0;
-    float derrg=0;
-    float derrd=0;
-    int n=0;
+   // periode en microsecondes
+    float32 vg=0;
+    float32 vd=0;
+    float32 pg=0;
+    float32 pd=0;
+    int16 tps=0;
+    float32 kpv=1;
+    float32 kdv=0.001;
+    float32 kiv=10;
+    float32 errprecg=0;
+    float32 errprecd=0;
+    float32 derrg=0;
+    float32 derrd=0;
+    int8 n=0;
     while (tps<temps)
     {
         actualisepos();
+      // Les vitesses actuelles des roues
         vg=1000000*dg/periode;
         vd=1000000*dd/periode;
+      
+      // Pour le correcteur :
+
+      // Calcul de la derivee
         derrg=1000000*((vcg-vg)-errprecg)/periode;
         derrd=1000000*((vcd-vd)-errprecd)/periode;
+      // Calcul de l'erreur
         errprecg=vcg-vg;
         errprecd=vcd-vd;
+      // Calcul de l'integrale
         interrg+=periode*errprecg/1000000;
         interrd+=periode*errprecd/1000000;
-        pg=MIN(99,floor(kpv*(vcg-vg)+kiv*interrg+kdv*derrg));
-        pd=MIN(99,floor(kpv*(vcd-vd)+kiv*interrd+kdv*derrd));
-        avance(pg,pd);
+      // Asservissement
+        pg=MAX(-99,MIN(99,floor(kpv*(vcg-vg)+kiv*interrg+kdv*derrg)));
+        pd=MAX(-99,MIN(99,floor(kpv*(vcd-vd)+kiv*interrd+kdv*derrd)));
+        
+      avance(pg, pd);
+      
         delay_us(periode);
+      // Un peu faux... mais bon c'est un limiteur de boucles
         tps+=periode;
-		
-		// inutiles
-        lesvitessesg[n]=vg;
-        lesvitessesd[n]=vd;
         n+=1;
     }
     avance(0,0);
@@ -208,397 +265,481 @@ void asservit(float vcg, float vcd,long temps,long periode)
 
 
 ////////////////////////////////////////////////////////////////////////////////
-float modulo_2_pi(float x)
+
+
+
+
+// Prend en entree un angle en radians entre 0 et PI. 
+void tourner(float32 thetacdeg)
 {
-    return x-floor(x/(PI*2))*2*PI;
-}
+   // Recoit un angle en radians. 
+   float32 theta_init=teta;
+   // Convertion degres radians
+   float32 thetac=thetacdeg*0.0174532925;
+   float32 v;
+   
+   // La fonction actualisepos ne remet pas teta ni tetadeg dans les intervalles conventionnels. Cela simplifie les calculs.
+   // Seule la fonction main modifie ces intervalles. 
 
-
-void tourner_gauche_3(float af,float vitesse_angulaire)
-{
-//float consigne_vitessegauche;
-float consigne_vitessedroite;
-float consigne_tetapoint;
-float tetapoint=0;
-float tetazero=teta;
-float k=0;
-
-float temps =0;
-
-float dt=0.5; //temps en millisecondes
-float vitesse_angulaire_finrampe=vitesse_angulaire/4;
-float temps_finrampe=0.6;
-float vitesse_angulaire_max;
- //float retard;
-
-while (tetapoint<vitesse_angulaire_finrampe && teta-tetazero<af){
-    actualisepos() ;//actualise x,y,vg,vd,teta,tetapoint
-    k=k+1;
-	temps=temps+dt;
-    tetapoint=(vitd-vitg)/l;
-    lestheta[k]=tetapoint;
-	consigne_tetapoint=vitesse_angulaire_finrampe*(temps/temps_finrampe); // déterminons t0 ensemble
-	consigne_vitessedroite=consigne_tetapoint/(2*l);
-	//consigne_vitessegauche= -consigne_vitessedroite; Pour une raison inconnue ça ne marche pas avec cette variable...
-	asservit(-consigne_vitessedroite,consigne_vitessedroite,dt*1000,10000);
-}
-
-//retard=teta-(af/PI)*asin(tetapoint*(4/PI));
-vitesse_angulaire_max=tetapoint/sin(PI*(teta-tetazero)/af);
-
-while(abs(teta-tetazero)<af){
-	actualisepos() ;//actualise x,y,vg,vd,teta,tetapoint
-	consigne_tetapoint=vitesse_angulaire_max*sin(PI*abs(teta-tetazero)/af);
-	consigne_vitessedroite=consigne_tetapoint/(2*l);
-    lestheta[k]=teta;
-    tetapoint=(vitd-vitg)/l;
-	//consigne_vitessegauche= -consigne_vitessedroite; Pour une raison inconnue ça ne marche pas avec cette variable...
-	asservit(-consigne_vitessedroite,consigne_vitessedroite,dt*1000,10000);
-	}
-asservit(0,0,dt*1000,10000);
-}
-
-void tourner_droite_3(float af,float vitesse_angulaire)
-{
-float consigne_vitessegauche;
-float consigne_vitessedroite;
-float consigne_tetapoint;
-float tetapoint=0;
-float tetazero=teta;
-
-float temps =0;
-float temps_finrampe=0.6;
-
-float dt=0.05;
-float retard;
-
-while (tetapoint<PI/8 && teta-tetazero<af){
-actualisepos() ;//actualise x,y,vg,vd,teta,tetapoint
-	temps=temps+dt;
-    tetapoint=(vitd-vitg)/l;
-	consigne_tetapoint=temps*(PI/(4*temps_finrampe*temps_finrampe)); // déterminons t0 ensemble
-	consigne_vitessedroite=-consigne_tetapoint/(2*l);
-	consigne_vitessegauche=-consigne_vitessedroite;
-	asservit(vitg,vitd,dt,0.01);
-}
-
-retard=teta-(af/PI)*asin(tetapoint*(4/PI));
-
-while(teta-tetazero<af){
-	actualisepos() ;//actualise x,y,vg,vd,teta,tetapoint
-	consigne_tetapoint=(PI/4)*sin(PI*(teta-retard)/af);
-	consigne_vitessedroite=-consigne_tetapoint/(2*l);
-	consigne_vitessegauche=-consigne_vitessedroite;
-	asservit(vitg,vitd,dt,0.01);
-	}
-}
-
-
-void tourner(float psi,float vitesse_angulaire){
-          float af= modulo_2_pi(psi-modulo_2_pi(teta)); //angle a faire
-          if (af<=PI)
-                tourner_gauche_3(af,vitesse_angulaire);
-                   
-            else 
-                tourner_droite_3(2*PI-af,vitesse_angulaire);
-          asservit(0,0,500000,10000);
- }
-                            
-                        
-    
-    
-
-void tourner(float tetac)
-{
+   // On tourne a droite
+   if(etat_robot == 3)
+   {
+      while (teta<theta_init+thetac)
+      {
+         // Fonction de pause
+         while(etat_robot == 5)
+         {
+            avance(0,0);
+            actualisepos();
+         }
+         // Si l'etat du robot est repasse en attente d'ordre (fonction delete).
+         if(etat_robot == 0)
+            return;
          
-    if (teta<=PI)// on fait plein de disjonctions des cas pour savoir dans quel sens le robot doit tourner pour faire face à la bonne direction
-    {
-        if ((tetac>=teta)&&(tetac<=teta+PI))
-        {
-            while(teta<=tetac)
-            {  
-                actualisepos();
-                asservit(-vmaxt,vmaxt,10000,10000);
-            }
-        }
-        else
-        {
-            if (tetac<PI)
-            {
-               while (teta>tetac)
-                {
-                    actualisepos();
-                    asservit(vmaxt,-vmaxt,10000,10000);
-                } 
-            }
-            else
-            {   
-                while (teta<=PI)
-                {
-                    actualisepos();
-                    asservit(vmaxt,-vmaxt,10000,10000);
-                }
-                actualisepos();
-                asservit(vmaxt,-vmaxt,10000,10000);
-                while (teta>=tetac)
-                {
-                    actualisepos();
-                    asservit(vmaxt,-vmaxt,10000,10000);
-                }
-            }
-        }
-    }
-    else 
-    {
-        if ((tetac>=teta-PI)&& (tetac<=teta))
-        {
-            while (teta>=tetac)
-            {
-               actualisepos();
-               asservit(vmaxt,-vmaxt,10000,10000);
-            }
-        }
-        else
-        {
-            if (tetac>PI)
-            {
-                while (teta<=tetac)
-                {
-                    actualisepos();
-                    asservit(-vmaxt,vmaxt,10000,10000);
-                }
-            }
-            else
-            {
-                while (teta>=PI)
-                {
-                    actualisepos();
-                    asservit(-vmaxt,vmaxt,10000,10000);
-                }
-                actualisepos();
-                asservit(-vmaxt,vmaxt,10000,10000);
-                while (teta<=tetac)
-                {
-                    actualisepos();
-                    asservit(-vmaxt,vmaxt,10000,10000);
-                }
-            }
-        }
-    }
-    asservit(0,0,500000,10000);
+         actualisepos();
+         v=vmint+(vmaxt-vmint)*fonction_vitesse(thetac, abs(teta-theta_init));
+         asservit(-v,v,10000,10000);
+      }
+   }
+   // On tourne a gauche
+   else
+   {
+      while (teta>theta_init-thetac)
+      {
+         // Fonction de pause
+         while(etat_robot == 5)
+         {
+            avance(0,0);
+            actualisepos();
+         }
+         // Si l'etat du robot est repasse en attente d'ordre (fonction delete).
+         if(etat_robot == 0)
+            return;
+         
+         actualisepos();
+         v=vmint+(vmaxt-vmint)*fonction_vitesse(thetac, abs(teta-theta_init));
+         asservit(v,-v,10000,10000);
+      }
+   }
+   asservit(0,0,500000,10000);
+   interrg=0;
+   interrd=0;
+   etat_robot = 0;
 }
 
 
-float test=0;
 ////////////////////////////////////////////////////////////////////////////////
-void suivreligne(float xc, float yc)
+// Suit une ligne droite partant de la position du robot a la position de l'objectif
+void suivreligne(int16 distancec)
 {
-    etat_robot=1;
+   // Calcul des coordonnees finales
+   float32 xc=x+(float32)(distancec)*cos(teta);
+   float32 yc=y+(float32)(distancec)*sin(teta);
+
+   // Initialisation des variables
     interrg=0;
     interrd=0;
-    set_motor_unit( 1,1,MPWM_INDEPENDENT | MPWM_ENABLE | MPWM_FORCE_H_0,0,0);
-    set_motor_unit( 1,2,MPWM_INDEPENDENT | MPWM_ENABLE | MPWM_FORCE_L_0,0,0);
-    int pas=10000; 
-    float xd=x;// on enregistre la coordonnée x de départ de notre ligne droite
-    float yd=y;// on enregistre la coordonnée y de départ de notre ligne droite
-    float norm=sqrt(((xc-xd)*(xc-xd))+((yc-yd)*(yc-yd)));
-    float vectx=(xc-xd)/norm;// on créé la coordonnée x du vecteur normalisé directeur de notre ligne droite
-    float vecty=(yc-yd)/norm;// on créé la coordonnée y du vecteur normalisé directeur de notre ligne droite
-    float vectortx=vecty;// on créé la coordonnée x du vecteur normalisé perpendiculaire à notre ligne droite
-    float vectorty=-vectx;// on créé la coordonnée y du vecteur normalisé perpendiculaire à notre ligne droite
-    float dist=0;//on créé la distance parcourue sur la ligne droite (elle correspond à la projection de (x,y) sur cette droite)
-    float erreur=0;// on créé l'erreur de position du robot, c'est à dire la distance de (x,y) à la droite
-    float longeur=sqrt((xc-x)*(xc-x)+(yc-y)*(yc-y));// on calcule la longeur de la droite que l'on doit suivre
-    float derreur=0;
-    float erreurprec=0; // Erreur precedente
-    float kd=5;
-    float kp=10;
-    float ki=0;
-    int u=0;
-    float integerr=0;
-    while (dist<longeur && etat_robot==1)// tant qu'on n'est pas arrivé
+    //set_motor_unit( 1,1,MPWM_INDEPENDENT | MPWM_ENABLE | MPWM_FORCE_H_0,0,0);
+    //set_motor_unit( 1,2,MPWM_INDEPENDENT | MPWM_ENABLE | MPWM_FORCE_L_0,0,0);
+    int16 pas=10000; 
+    float32 xd=x;// on enregistre la coordonnée x de départ de notre ligne droite
+    float32 yd=y;// on enregistre la coordonnée y de départ de notre ligne droite
+    float32 longueur=sqrt(((xc-xd)*(xc-xd))+((yc-yd)*(yc-yd)));
+    float32 vectx=(xc-xd)/longueur;// on créé la coordonnée x du vecteur normalisé directeur de notre ligne droite
+    float32 vecty=(yc-yd)/longueur;// on créé la coordonnée y du vecteur normalisé directeur de notre ligne droite
+    float32 vectortx=vecty;// on créé la coordonnée x du vecteur normalisé perpendiculaire à notre ligne droite
+    float32 vectorty=-vectx;// on créé la coordonnée y du vecteur normalisé perpendiculaire à notre ligne droite
+    float32 dist=0;//on créé la distance parcourue sur la ligne droite (elle correspond à la projection de (x,y) sur cette droite)
+    float32 erreur=0;// on créé l'erreur de position du robot, c'est à dire la distance de (x,y) à la droite
+    //float longueur=sqrt((xc-x)*(xc-x)+(yc-y)*(yc-y));// on calcule la longueur de la droite que l'on doit suivre
+    float32 derreur=0; // derivee erreur
+    float32 erreurprec=0; // erreur precedente
+   // Coefficients PID
+    float32 kd=5;
+    float32 kp=10;
+    float32 ki=0;
+    float32 integerr=0;
+
+	float32 r;
+	float32 vd;
+	float32 vg;
+
+    integerr=1;
+    v=vmin;
+    integerr=0;
+    while (dist<longueur && (etat_robot==1 || etat_robot == 2))// tant qu'on n'est pas arrivé
     {
+         // Fonction de pause
+         while(etat_robot == 5)
+         {
+            avance(0,0);
+            actualisepos();
+         }
+         // Si l'etat du robot est repasse en attente d'ordre (fonction delete).
+         if(etat_robot == 0)
+            return;
+         
         actualisepos();
-        dist=sqrt(((x-xd)*vectx+(y-yd)*vecty)*((x-xd)*vectx+(y-yd)*vecty));// on actualise la distance que l'on a parcouru sur la droite
-        erreur=(x-xd)*vectortx+(y-yd)*vectorty;// on actualise l'erreur de position. C'est un produit scalaire
+        dist=sqrt(((x-xd)*(x-xd))+((y-yd)*(y-yd)));// on actualise la distance que l'on a parcourue sur la droite
+        erreur=(x-xd)*vectortx+(y-yd)*vectorty;// on actualise l'erreur de position
         derreur=(erreur-erreurprec)/(0.000001*pas);
+        // Deux lignes supprimees
         erreurprec=erreur;
-        integerr+=erreur*pas/1000000;
-		// asservissement en vitesse
-        v=vmin+(vmax-vmin)*exp(-((dist-longeur/2)/(longeur/3))*((dist-longeur/2)/(longeur/3))*((dist-longeur/2)/(longeur/3))*((dist-longeur/2)/(longeur/3)));
+        integerr+=erreur*pas/1000000.0;
+        //v=vmin+(vmax-vmin)*exp(-((dist-longueur/2)/(longueur/3))*((dist-longueur/2)/(longueur/3))*((dist-longueur/2)/(longueur/3))*((dist-longueur/2)/(longueur/3)));
+        v=vmin+(vmax-vmin)*fonction_vitesse(dist, longueur);
         //float vg=v*(1-kp*erreur-kd*derreur-ki*integerr);
         //float vd=v*(1+kp*erreur+kd*derreur+ki*integerr);
         //float r=kp*erreur+kd*derreur+ki*integerr;
-        float r=max(-5,min((l/2)*(kp*erreur+kd*derreur),5));
-        float vg=v-r;
-        float vd=v+r;
-        //avance(vg,vd,pas,periode);// on fournit la bonne puissance aux deux moteurs (asservissement de dist et erreur)
-        asservit(vg,vd,pas,10000);
+        // A differencier pour avancer et reculer
+        r=MAX(-5,MIN(l*0.5*(kp*erreur+kd*derreur),5));
+        vg=v-r;
+        vd=v+r;
 
-		// inutiles
-        leserreurs[u]=erreur;
-        lesdistances[u]=dist;
-        u+=1;
+      // On asservit en distance parcourue sur la droite.
+      // On envoie une vitesse positive pour avancer, negative pour reculer.
+      // Sachant que vg et vd sont positifs.
+      if(etat_robot == 2)
+          asservit(-vg,-vd,pas,10000);
+      else
+         asservit(vg,vd,pas,10000);
     }
-    if (dist>=longeur)
+    if (dist>=longueur)
     {
-        trajet_fini=1;
-        etat_robot=0;
+      etat_robot=0;
     }
+   else
+   {
+      // On est en pause
+      // etat_robot=2;
+   }
     asservit(0,0,500000,10000);
     interrg=0;
     interrd=0;
+   etat_robot = 0;
 }
+
 
 ////////////////////////////////////////////////////////////////////////////////
 
-float compteur=0;
 
-void aller(float xc,float yc)// la fonction qu'on appelle pour aller en (xc,yx), elle permet de gérer des exceptions comme xc=x qui empêchent de calculer l'angle tetac
+
+
+
+
+
+// --------------------- Fonctions i2c ------------------------
+
+/*
+Etats du robot : 
+0 : en attente d'ordre
+1 : avancer
+2 : reculer
+3 : tourner droit
+4 : tourner gauche
+5 : mets de la puissance sur les moteurs
+6 : en pause
+*/
+
+// Fonctions utiles pour le traitement de la communication.
+int1 attente()
 {
-    trajet_fini=0;
-    if ((x-xc)*180/PI>-10 && (x-xc)*180/PI<10)// dans le cas ou xc est proche de x
-    {
-        if ((yc-y)<=0)// si on va vers le bas
-        {
-            tourner(3*PI/2);
-            suivreligne(xc,yc);// tetac=3PI/2
-        }
-        else// si on va vers le haut 
-        {
-            tourner(PI/2);
-            suivreligne(xc,yc);// tetac=PI/2
-        }
-    }
-    else
-    {
-        if (x<xc)// si on va a droite
-        {
-            float tetac=atan((yc-y)/(xc-x));// on calcule tetac et on le normalise
-            if (tetac>2*PI)
-            {
-                tetac-=2*PI;
-            }
-            if (tetac<0)
-            {
-                tetac+=2*PI;
-            }  
-            float diffangle=teta-tetac;
-            if (diffangle>PI)
-            {
-                diffangle=diffangle-2*PI;
-            }
-            if (diffangle<-PI)
-            {
-                diffangle=diffangle+2*PI;
-            }
-            if (sqrt(diffangle*diffangle)>0.3)
-            {
-                compteur=diffangle;
-                tourner(tetac);
-            }
-            suivreligne(xc,yc);
-        }
-        else// si on va a gauche
-        {
-            float tetac=PI+atan((yc-y)/(xc-x));// on calcule tetac et on le normalise
-            if (tetac>2*PI)
-            {
-                tetac-=2*PI;
-            }
-            if (tetac<0)
-            {
-                tetac+=2*PI;
-            }  
-            float diffangle=teta-tetac;
-            if (diffangle>PI)
-            {
-                diffangle=diffangle-2*PI;
-            }
-            if (diffangle<-PI)
-            {
-                diffangle=diffangle+2*PI;
-            }
-            if (sqrt(diffangle*diffangle)>0.3)
-            {
-                compteur=diffangle;
-                tourner(tetac);
-            }
-            suivreligne(xc,yc);
-        }
-    }
+   if(etat_robot == 0)
+      return 1;
+   return 0;
 }
 
-////////////////////////////////////////////////////////////////////////////////
+int1 est_pause()
+{
+   if(etat_robot == 6)
+      return 1;
+   return 0;
+}
 
-BYTE data = 0; // Les données reçues 
-BYTE state = 1; // L'état du bus I2C(0 : addresse reçue, 1 : byte de données reçu, 0x80 : demande de réponse, 0x81 : demandede reponse apres avoir recu une donnee)
+
+void avance(int16 distance)
+{
+   // Change l'etat du robot et donne la distance de consigne
+   // Prend en entree la distance a parcourir, en mm.
+   if(attente()==0)
+      return;
+      
+   etat_robot = 1;
+   distancec = distance;
+}
+
+//int8 loggg=0;
+void recule(int16 distance)
+{
+   // Change l'etat du robot et donne la distance de consigne
+   // Prend en entree la distance a parcourir, en mm.
+   if(attente()==0)
+      return;
+      
+   etat_robot = 2;
+   //loggg=2;
+   distancec = distance;
+}
+
+void tourne(int16 angle)
+{
+   // Change l'etat du robot et donne l'angle de consigne
+   // Prend en entree l'angle a tourner (entre 0 et 360 degres), en degre en tournant a droite.
+   if(attente()==0)
+      return;
+      
+   etat_robot = 3;
+   anglec=modulo_360(angle);
+   if(anglec > 180)
+   {
+      etat_robot = 4;
+      anglec=360-anglec;
+   }
+}
+
+// Ou tourne_roues....
+void puissance_pi(int16 puiss)
+{
+   // Mise en place d'une puissance brute sur les moteurs.
+   // On recoit un entier non signe. On met ensuite un offset pour passer dans l'intervalle voulu
+   if(attente()==0)
+      return;
+   
+   if(puiss > 2*puissancec_max)
+      return;
+   puissancec=puiss-puissancec_max;
+   etat_robot=5;
+}
+
+void pause()
+{
+   if(attente()==0 || est_pause() == 1)
+      return;
+
+   // On retient l'ancien etat du robot
+   ret_etat_robot = etat_robot;
+   // Change l'etat du robot pour le mettre en pause
+   etat_robot = 6;
+   // La suite des actions est a programmer
+}
+
+void play()
+{
+   // Change l'etat du robot pour le mettre en marche (ie quitte pause)
+   if(est_pause() == 1)
+      return;
+   etat_robot = ret_etat_robot;
+   ret_etat_robot = 100;
+   // On remet en place les données
+   
+}
+
+void delete()
+{
+   // Supprime l'action en pause. Permet de revenir a l'etat d'attente d'ordres.
+   if(est_pause() == 1)
+      return;
+   etat_robot = 0;
+   ret_etat_robot = 100;
+}
+
+void shutdown()
+{
+   // Utilisation de sleep pour "eteindre" le dsPIC.
+   etat_robot = 7;
+   sleep(SLEEP_FULL);
+}
 
 
-// Flag pour l'interruption du processeur lors d'un message arrivant via i2c dans le dsPIC.
-//int nbr_bytes = 0;
+// --------------------- Communication i2c ------------------------
+
+// Variables
+
+/*
+0 : addresse reçue, 
+1 a 0x7F : byte de données reçu, 1 etant le premier, 2 le second, ....
+0x80 : demande de réponse, 
+0x81 a 0xFF : reponses a envoyer. Si 0x81, alors un byte de donnee a deja ete envoye. S'incremente a chaque envoit, commme pour la reception.
+*/
+
+BYTE data[8]; // Les données reçues 
+//BYTE write[10];
+
+BYTE state = 1; // L'état du bus I2C(0 : addresse reçue, 1 : byte de données reçu, 0x80 : demande de réponse)
+
+int16 buff_i2c;
 
 #INT_SI2C
 void si2c_interrupt() {
     state = i2c_isr_state();
-    switch (state) {
-        case 0:
-            i2c_read();
-            break;
-        case 1:
-            data = i2c_read();
-            if(bytes_a_venir == 0 )
-            {
-                if (data<3)
-                {
-                    etat_robot=data;
-                }
-                else
-                {
-                    bytes_a_venir++;
-                }
-            }
-            else if (bytes_a_venir==1)
-            {
-                xbut=300*data/255;
-                bytes_a_venir++;
-              
-            }
-            else if (bytes_a_venir==2)
-            {
-                ybut=data;
-                bytes_a_venir=0;
-            }
-            break;
-        case 0x80:
-            i2c_write(trajet_fini);
-            break;
-        default:
-            break;
+    if(state<=0x08)
+    {
+      data[state] = i2c_read();
+      
+      // Fonctions "systeme"
+      if(state==0x01 && data[0x01] >= 30)
+      {
+          if(data[0x01] == 30)
+             pause();
+          else if(data[0x01] == 31)
+             play();
+          else if(data[0x01] == 32)
+             delete();
+          else if(data[0x01] == 33)
+             shutdown();
+      }
+      // Fonctions de mouvement
+      else if(state==0x03 && data[0x01] >= 20)
+      {
+         buff_i2c = make16(data[0x03], data[0x02]);
+         if(data[0x01] == 20)
+            avance(buff_i2c);
+         else if(data[0x01] == 21)
+            recule(buff_i2c);
+         else if(data[0x01] == 22)
+            tourne(buff_i2c);
+         else if(data[0x01] == 23)
+            puissance_pi(buff_i2c);
+      }
+      // Fonction set
+      else if(state>=0x06 && data[0x01]==0)
+      {
+         // Ne pas appeler cette fonction quand le robot est en mouvement !!!
+         // Lorsque toutes les donnees ont ete recues, on traite
+         // Pour les int16, les bits de poids faible ont ete donnes en premier
+         
+         // On n'a pas le temps de convertir en float32, sinon on a un connection time out. 
+         // On calculera les coordonnees plus tard.
+         set_donnees=1;
+         xpi = make16(data[0x03], data[0x02]);
+         ypi = make16(data[0x05], data[0x04]);
+         tetadeg = make16(data[0x07], data[0x06]);
+      }
+    }
+    else if(state>=0x80)
+    {
+      //i2c_write(data[state-0x80]);
+      if(state < 0x82)
+         i2c_write(0x00);
+      else if(state == 0x82)
+         i2c_write(etat_robot);
+      else if(state == 0x83)
+         i2c_write((int16)x);
+      else if(state == 0x84)
+         i2c_write(((int16)x)>>8);
+      else if(state == 0x85)
+         i2c_write((int16)y);
+      else if(state == 0x86)
+         i2c_write(((int16)y)>>8);
+      else if(state == 0x87)
+         i2c_write((int16)tetadeg);
+      else if(state == 0x88)
+         i2c_write(((int16)tetadeg)>>8);
+      else
+         i2c_write(0x00);
     }
 }
 
 void main() 
 {    
+    //On active les interuptions physiques du PIC
     enable_interrupts(INT_SI2C);
     enable_interrupts(INTR_GLOBAL);
+    
+    // Initialisation des moteurs
     setup_qei(1,QEI_MODE_X2);// on initialise le compteur de l'encodeur droit
     setup_qei(2,QEI_MODE_X2);// on initialise le compteur de l'encodeur gauche
+    qei_set_count(1, 0);
+    qei_set_count(2, 0);
     output_high(PIN_B3);// on enable les ponts en H
     output_high(PIN_A0);
     setup_motor_pwm(1,MPWM_FREE_RUN , 100);
-    setup_motor_pwm(2,MPWM_FREE_RUN , 100);    
-    while (etat_robot<2)
+    
+    int8 i=0;
+    for(i=0; i < 8; i++)
+      data[i]=0;
+    
+    while (etat_robot < 7)
     {
-        if (etat_robot==1)
-        {
-            trajet_fini=0;
-            aller(xbut,ybut);
-        }
+      // Soit il faut remettre les angles comme demande par le PI
+      if(set_donnees==1)
+      {
+         set_donnees=0;
+         x=(float32)xpi;
+         y=(float32)ypi;
+         teta=tetadeg*0.01745329251994;
+      }
+      // Soit on remet les valeurs des angles entre 0 et 2*PI et entre 0 et 360 au cas ou
+      else
+      {
+         teta = modulo_2_pi(teta);
+         tetadeg = modulo_360(tetadeg);
+      }
+      
+      // Un mouvement à faire? 
+	 // Soit en attente d'ordre, soit en pause. 
+     if(attente() == 1 || est_pause() == 1)
+       {
+       // Utilisation du frein moteur pour rester arrete.
+         avance(0,0);
+       }
+     else if(etat_robot == 1)
+      {
+         if(distancec == 0)
+          {
+            etat_robot = 0;
+            avance(0,0);
+          }
         else
         {
-            actualisepos();
-            delay_ms(1);
-        }
+            suivreligne(distancec);
+         // Envoi des consignes
+            //avance(50,50);
+            //actualisepos();
+         //delay_us(10);
+         }
+      }
+     else if(etat_robot == 2)
+     {
+         if(distancec == 0)
+       {
+            etat_robot = 0;
+         avance(0,0);
+         }
+      else
+      {
+         // Envoi des consignes
+         suivreligne(distancec);
+         //avance(-50,-50);
+         //actualisepos();
+      }
+     }
+      else if(etat_robot == 3 || etat_robot == 4)
+      {
+      if(anglec == 0)
+       {
+         etat_robot = 0;
+         avance(0,0);
+       }
+      else
+      {
+         // Envoi des consignes
+         tourner(anglec);
+         /*if(etat_robot==3)
+            avance(-50,50);
+         else
+            avance(50,-50);
+         actualisepos();*/
+      }
+      }
+      else if(etat_robot == 5)
+     {
+      avance(puissancec,puissancec);
+      actualisepos();
+     }
+     // Inutile. Au pire on perd de l'energie. Une instruction = 200ns
+      //delay_us(5);
     }
 }
+
+
