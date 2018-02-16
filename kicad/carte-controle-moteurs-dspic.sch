@@ -36,8 +36,8 @@ $Descr A4 11693 8268
 encoding utf-8
 Sheet 1 1
 Title "Carte contrôle moteurs 2A - 2018"
-Date ""
-Rev ""
+Date "2018-02-16"
+Rev "v1.0"
 Comp "Centrale Lyon"
 Comment1 ""
 Comment2 "Contacter G. CHARREAUX (chxguillaume@gmail.com)"
