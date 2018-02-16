@@ -3,7 +3,7 @@
   (general
     (links 170)
     (no_connects 0)
-    (area 23.939499 35.369499 161.480501 117.030501)
+    (area 20.32 34.29 165.100001 122.364501)
     (thickness 1.6002)
     (drawings 9)
     (tracks 418)
@@ -15,15 +15,16 @@
   (page A4)
   (title_block
     (title "Carte contrôle moteurs 2A - 2018")
+    (rev v1.x)
     (company "Centrale Lyon")
     (comment 2 "Contacter G. CHARREAUX (chxguillaume@gmail.com)")
   )
 
   (layers
-    (0 Dessus signal hide)
+    (0 Dessus signal)
     (1 Interne3 signal)
-    (2 Interne2 signal hide)
-    (31 Dessous signal hide)
+    (2 Interne2 signal)
+    (31 Dessous signal)
     (32 B.Adhes user hide)
     (33 F.Adhes user hide)
     (34 B.Paste user hide)
@@ -4553,7 +4554,7 @@
     )
   )
 
-  (gr_text "Carte contrôle moteurs ERACL 2018 - vX.X" (at 156.21 76.2 90) (layer F.SilkS)
+  (gr_text "Carte contrôle moteurs ERACL 2018 - v1.x" (at 156.21 76.2 90) (layer F.SilkS)
     (effects (font (size 2.032 1.524) (thickness 0.3048)))
   )
   (gr_line (start 154.94 116.84) (end 30.48 116.84) (angle 90) (layer Edge.Cuts) (width 0.381))
